@@ -6,9 +6,8 @@ Azure Container Apps version:
     Azure Blob Storage into model/best.pt before this app starts.
   - Started by the Dockerfile with: uvicorn src.app:app --host 0.0.0.0 --port 8000
 
-Only wind turbines are reported. Classes listed in HIDDEN_CLASSES (default:
-"pylon") are filtered out inside the model, so they never appear in the
-boxes, the counts, the ZIP results or the CSV files.
+Pylon detections are ignored, so only wind turbines show up in the boxes,
+the counts, the ZIP results and the CSV files.
 
 Two ways to use it:
   - Single image:  POST /predict      (returns detections as JSON)
@@ -42,13 +41,8 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 MAX_ZIP_MB = int(os.getenv("MAX_ZIP_MB", "200"))
 MAX_ZIP_IMAGES = int(os.getenv("MAX_ZIP_IMAGES", "300"))
 MAX_IMAGE_MB = int(os.getenv("MAX_IMAGE_MB", "50"))
-# Classes the model knows about but we never want to show (comma separated,
-# case-insensitive, matched as a substring). Override with HIDDEN_CLASSES.
-HIDDEN_CLASSES = tuple(
-    name.strip().lower()
-    for name in os.getenv("HIDDEN_CLASSES", "pylon").split(",")
-    if name.strip()
-)
+# Detections whose class name contains this text are ignored (case-insensitive).
+IGNORE_LABEL = "pylon"
 JOB_TTL_SECONDS = 3600
 THUMB_SIZE = (800, 800)
 
@@ -73,24 +67,8 @@ async def lifespan(app: FastAPI):
             f"Model file not found at {MODEL_PATH}. "
             "Check that src/download_model.py ran and the storage secret is set."
         )
-    model = YOLO(MODEL_PATH)
-    state["model"] = model
-    names = model.names
-    state["keep_ids"] = [
-        cid
-        for cid, name in names.items()
-        if not any(hidden in str(name).lower() for hidden in HIDDEN_CLASSES)
-    ]
-    state["hidden"] = [
-        names[cid] for cid in names if cid not in state["keep_ids"]
-    ]
-    if not state["keep_ids"]:
-        raise RuntimeError(
-            f"HIDDEN_CLASSES {HIDDEN_CLASSES} would hide every class: {names}"
-        )
-    print("Model ready. Classes:", names)
-    print("Reporting:", [names[i] for i in state["keep_ids"]])
-    print("Hidden:", state["hidden"])
+    state["model"] = YOLO(MODEL_PATH)
+    print("Model ready. Classes:", state["model"].names)
     yield
     state.clear()
 
@@ -107,8 +85,7 @@ def index():
 def info():
     model = state["model"]
     return {
-        "classes": [model.names[i] for i in state["keep_ids"]],
-        "hidden_classes": state["hidden"],
+        "classes": [n for n in model.names.values() if IGNORE_LABEL not in n.lower()],
         "model_path": MODEL_PATH,
         "zip_limits": {"max_zip_mb": MAX_ZIP_MB, "max_images": MAX_ZIP_IMAGES},
     }
@@ -122,14 +99,7 @@ def run_detection(image, conf, iou, imgsz):
     model = state["model"]
     with model_lock:
         start = time.perf_counter()
-        result = model.predict(
-            image,
-            conf=conf,
-            iou=iou,
-            imgsz=imgsz,
-            classes=state["keep_ids"],
-            verbose=False,
-        )[0]
+        result = model.predict(image, conf=conf, iou=iou, imgsz=imgsz, verbose=False)[0]
         elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
 
     detections = []
@@ -139,9 +109,12 @@ def run_detection(image, conf, iou, imgsz):
         result.boxes.cls.tolist(),
         strict=True,
     ):
+        label = model.names[int(cls)]
+        if IGNORE_LABEL in label.lower():
+            continue  # pylon: not needed, skip it
         detections.append(
             {
-                "label": model.names[int(cls)],
+                "label": label,
                 "confidence": round(score, 4),
                 "box": [round(v, 1) for v in xyxy],
             }
