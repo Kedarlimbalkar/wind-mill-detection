@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from ultralytics import YOLO
 
 # download_model.py saves the blob here (relative to /app, the container workdir).
@@ -62,8 +62,15 @@ def predict(
 ):
     try:
         image = Image.open(io.BytesIO(file.file.read())).convert("RGB")
-    except Exception:
-        raise HTTPException(status_code=400, detail="That file is not a readable image.")
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400, detail="That file is not a readable image."
+        ) from exc
 
     model = state["model"]
     start = time.perf_counter()
