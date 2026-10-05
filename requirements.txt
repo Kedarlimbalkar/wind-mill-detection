@@ -9,6 +9,5 @@ opencv-python-headless
 fastapi
 uvicorn
 python-multipart
-nest-asyncio
-pyngrok
 azure-storage-blob
+azure-identity
