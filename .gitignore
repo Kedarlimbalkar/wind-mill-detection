@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Model weights and large artifacts (tracked via Azure Blob, not Git)
+*.pt
+*.pth
+runs/
+weights/
+
+# Data (lives in Azure Blob, not Git)
+*.zip
+train/
+valid/
+test/
+data.yaml
+
+# Secrets -- NEVER commit these (BRD NFR-4)
+.env
+*_connection_string*
+azure_credentials*
+
+# OS/editor
+.DS_Store
+.vscode/
+
+# Build/tool caches
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
